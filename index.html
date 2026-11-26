@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>LS Booking Number Generator</title>
+  <style>
+    :root { color-scheme: light; font-family: Arial, Helvetica, sans-serif; color: #111; background: #fff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff; }
+    main { width: min(920px, calc(100% - 36px)); margin: 56px auto; }
+    h1 { margin: 0 0 8px; font-size: clamp(24px, 4vw, 32px); font-weight: 650; letter-spacing: -.6px; }
+    .sub { margin: 0; color: #666; font-size: 14px; }
+    .panel { margin-top: 30px; border: 1px solid #e5e5e5; border-radius: 10px; padding: 24px; }
+    .label { color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .number { margin: 12px 0 20px; font-size: clamp(36px, 8vw, 58px); line-height: 1.1; font-weight: 650; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+    button { border: 1px solid #111; border-radius: 6px; padding: 13px 18px; background: #111; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #fff; color: #111; border-color: #ccc; }
+    button:disabled { opacity: .55; cursor: wait; }
+    .status { min-height: 20px; margin-top: 13px; color: #666; font-size: 13px; }
+    .history-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 34px 0 12px; }
+    h2 { margin: 0; font-size: 19px; font-weight: 650; }
+    .history-wrap { overflow-x: auto; border: 1px solid #e5e5e5; border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; min-width: 420px; }
+    th, td { padding: 13px 15px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
+    th { color: #666; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; background: #fafafa; }
+    tr:last-child td { border-bottom: 0; }
+    td:first-child { font-weight: 650; font-variant-numeric: tabular-nums; }
+    .empty { padding: 22px 15px; color: #777; text-align: center; }
+    .foot { margin-top: 14px; color: #888; font-size: 12px; }
+    @media (max-width: 600px) { main { margin: 32px auto; } .panel { padding: 19px; } button { flex: 1; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>LS Booking Number Generator</h1>
+      <p class="sub">Shared booking register</p>
+    </header>
+
+    <section class="panel" aria-live="polite">
+      <div class="label">Latest generated booking number</div>
+      <div class="number" id="latest">LS-261291</div>
+      <div class="actions">
+        <button id="generate">Generate next number</button>
+        <button id="copy" class="secondary" disabled>Copy number</button>
+      </div>
+      <div class="status" id="status" role="status">Connecting to the shared register…</div>
+    </section>
+
+    <section>
+      <div class="history-head">
+        <h2>Booking history</h2>
+        <button id="refresh" class="secondary">Refresh</button>
+      </div>
+      <div class="history-wrap">
+        <table>
+          <thead><tr><th>Booking number</th><th>Date and time</th></tr></thead>
+          <tbody id="history"><tr><td class="empty" colspan="2">Loading booking history…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="foot">Showing the 100 most recently generated numbers. All users share the same online sequence.</p>
+    </section>
+  </main>
+
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+    const SUPABASE_URL = 'https://dhvydggcjheuqkwowech.supabase.co';
+    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Ukl8ELz0auRQ7gO1WRufhw_Bgz5G1z_';
+    const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+
+    const latestEl = document.getElementById('latest');
+    const historyEl = document.getElementById('history');
+    const statusEl = document.getElementById('status');
+    const generateBtn = document.getElementById('generate');
+    const copyBtn = document.getElementById('copy');
+    let currentNumber = '';
+
+    function setStatus(message, isError = false) {
+      statusEl.textContent = message;
+      statusEl.style.color = isError ? '#b42318' : '#666';
+    }
+
+    function formatDate(value) {
+      return new Intl.DateTimeFormat(undefined, {
+        year: 'numeric', month: 'short', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      }).format(new Date(value));
+    }
+
+    async function loadHistory() {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('booking_number, created_at, sequence_number')
+        .order('sequence_number', { ascending: false })
+        .limit(100);
+
+      if (error) {
+        historyEl.innerHTML = '<tr><td class="empty" colspan="2">Could not load history. Check the database setup.</td></tr>';
+        setStatus(error.message, true);
+        return;
+      }
+
+      if (!data.length) {
+        historyEl.innerHTML = '<tr><td class="empty" colspan="2">No booking numbers generated yet.</td></tr>';
+        return;
+      }
+
+      historyEl.replaceChildren(...data.map(row => {
+        const tr = document.createElement('tr');
+        const number = document.createElement('td');
+        const date = document.createElement('td');
+        number.textContent = row.booking_number;
+        date.textContent = formatDate(row.created_at);
+        tr.append(number, date);
+        return tr;
+      }));
+
+      if (!currentNumber && data[0]) latestEl.textContent = data[0].booking_number;
+    }
+
+    generateBtn.addEventListener('click', async () => {
+      generateBtn.disabled = true;
+      setStatus('Generating booking number…');
+      const { data, error } = await supabase.rpc('generate_booking_number');
+      generateBtn.disabled = false;
+
+      if (error) {
+        setStatus(`Could not generate a number: ${error.message}`, true);
+        return;
+      }
+      const result = Array.isArray(data) ? data[0] : data;
+      if (!result?.booking_number) {
+        setStatus('The database did not return a booking number. Please try again.', true);
+        return;
+      }
+
+      currentNumber = result.booking_number;
+      latestEl.textContent = currentNumber;
+      copyBtn.disabled = false;
+      setStatus(`${currentNumber} generated successfully.`);
+      await loadHistory();
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      if (!currentNumber) return;
+      try {
+        await navigator.clipboard.writeText(currentNumber);
+        setStatus(`${currentNumber} copied.`);
+      } catch {
+        setStatus('Copy was blocked by this browser. Please select the number manually.', true);
+      }
+    });
+
+    document.getElementById('refresh').addEventListener('click', loadHistory);
+
+    await loadHistory();
+    setStatus('Connected. Booking history refreshes automatically.');
+    // Poll so the other users' bookings appear even without Realtime configuration.
+    setInterval(loadHistory, 5000);
+  </script>
+</body>
+</html>
