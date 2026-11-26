@@ -18,6 +18,7 @@
     .actions { display: flex; flex-wrap: wrap; gap: 10px; }
     button { border: 1px solid #111; border-radius: 6px; padding: 13px 18px; background: #111; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
     button.secondary { background: #fff; color: #111; border-color: #ccc; }
+    button.danger { background: #fff; color: #b42318; border-color: #e3aaaa; }
     button:disabled { opacity: .55; cursor: wait; }
     .status { min-height: 20px; margin-top: 13px; color: #666; font-size: 13px; }
     .history-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 34px 0 12px; }
@@ -46,6 +47,7 @@
       <div class="actions">
         <button id="generate">Generate next number</button>
         <button id="copy" class="secondary" disabled>Copy number</button>
+        <button id="undo" class="danger">Undo last number</button>
       </div>
       <div class="status" id="status" role="status">Connecting to the shared register…</div>
     </section>
@@ -77,6 +79,7 @@
     const statusEl = document.getElementById('status');
     const generateBtn = document.getElementById('generate');
     const copyBtn = document.getElementById('copy');
+    const undoBtn = document.getElementById('undo');
     let currentNumber = '';
 
     function setStatus(message, isError = false) {
@@ -106,6 +109,9 @@
 
       if (!data.length) {
         historyEl.innerHTML = '<tr><td class="empty" colspan="2">No booking numbers generated yet.</td></tr>';
+        currentNumber = '';
+        latestEl.textContent = 'LS-261291';
+        copyBtn.disabled = true;
         return;
       }
 
@@ -158,6 +164,32 @@
       } catch {
         setStatus('Copy was blocked by this browser. Please select the number manually.', true);
       }
+    });
+
+    undoBtn.addEventListener('click', async () => {
+      const confirmed = window.confirm(
+        'Undo the latest generated booking number?\n\nOnly the most recent number will be removed from the shared history, and it will be available to generate again.'
+      );
+      if (!confirmed) return;
+
+      undoBtn.disabled = true;
+      setStatus('Undoing the latest booking number…');
+      const { data, error } = await supabase.rpc('undo_last_booking_number');
+      undoBtn.disabled = false;
+
+      if (error) {
+        setStatus(`Could not undo the last number: ${error.message}`, true);
+        return;
+      }
+
+      const result = Array.isArray(data) ? data[0] : data;
+      if (!result?.undone_booking_number) {
+        setStatus('The database did not confirm the undo. Please refresh and try again.', true);
+        return;
+      }
+
+      await loadHistory();
+      setStatus(`${result.undone_booking_number} was undone and can now be generated again.`);
     });
 
     document.getElementById('refresh').addEventListener('click', loadHistory);
